@@ -100,3 +100,9 @@ OpenStax content is openly licensed, but the specific license varies by book
 collection declares into `book.json`. If you publish the output, surface
 attribution to OpenStax and the authors, and honor the NonCommercial /
 ShareAlike terms when the book carries them.
+
+## License
+
+This tool (the converter code in this repo) is released under the
+[MIT License](LICENSE). Note this is separate from the license of any book
+content you convert with it — see the section above.
