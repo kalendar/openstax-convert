@@ -73,6 +73,7 @@ book.json
 └── sections[]
     ├── id, kind ("section" | "introduction" | "frontmatter"…)
     ├── chapter, number ("3.2"), title, objectives[], figures[], tokens
+    ├── footnotes[]  — {id "fnN", html} per footnote, in document order
     └── blocks[]
         ├── anchor   — globally unique id, e.g. "m71114-b4"
         │              (use as a DOM id / scroll anchor and grounding handle)
@@ -85,6 +86,15 @@ Figure handling: image `src` is rewritten to `media/<file>`, and each figure's
 alt text + caption are folded into the block `text`, so a text-only model can
 answer questions about images it can't see. CNXML notes, tables, glossaries,
 lists, and MathML are mapped to sensible HTML.
+
+Footnote handling: CNXML `<footnote>` elements (typically full bibliography
+citations) are NOT rendered inline — that would dump citation text into the
+middle of the reading flow and into the plain-text `text` fields that feed
+retrieval prompts. Instead each becomes a numbered superscript marker in the
+block html (`<sup class="footnote-ref"><a id="fnrefN" href="#fnN">N</a></sup>`)
+and the content is collected into the section-level `footnotes[]` list, for a
+reader to render at the bottom of the page (link `#fnN` ↔ backlink `#fnrefN`).
+Footnotes are stripped entirely from trails, headings, and objectives.
 
 ## Use as a Claude skill
 

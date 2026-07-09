@@ -177,11 +177,13 @@ def render(el, level):
         return render_figure(el, level)
     if t == "note":
         cls = el.get("class", "")
-        label = find_title(el) or humanize(cls) or "Note"
+        # find_title() returns already-rendered HTML (e.g. footnotes as
+        # <span class="footnote">) — escape only the plain-text fallbacks.
+        label = find_title(el) or escape(humanize(cls) or "Note")
         body = "".join(
             render(c, level) for c in el if local(c.tag) != "title")
         return (f'<aside class="note note-{escape(cls)}">'
-                f'<p class="note-label">{escape(label)}</p>{body}</aside>')
+                f'<p class="note-label">{label}</p>{body}</aside>')
     if t == "table":
         return render_table(el, level)
     if t == "glossary":
@@ -190,6 +192,12 @@ def render(el, level):
         body = "".join(render(c, level) for c in el)
         return f'<div class="{t}">{body}</div>'
     if t == "footnote":
+        # Rendered inline as a marked span; extract_footnotes() post-processes
+        # the finished block html into numbered superscript markers + a
+        # section-level footnotes list. Collection must NOT happen here:
+        # rendering isn't single-pass (find_title() runs both for trail
+        # bookkeeping and for the actual heading html), so side effects during
+        # render double-count.
         return f'<span class="footnote">{inner(el, level)}</span>'
     if t == "quote":
         return f"<blockquote>{inner(el, level)}</blockquote>"
@@ -241,6 +249,79 @@ def html_to_text(html):
     return ex.text()
 
 
+FOOTNOTE_OPEN = '<span class="footnote">'
+
+
+def _find_footnote_spans(html):
+    """Yield (start, end, content) for each footnote span, balancing nested
+    <span> tags so footnote content containing spans doesn't truncate."""
+    i = 0
+    while True:
+        j = html.find(FOOTNOTE_OPEN, i)
+        if j == -1:
+            return
+        k = j + len(FOOTNOTE_OPEN)
+        depth = 1
+        while depth:
+            ns = html.find("<span", k)
+            ne = html.find("</span>", k)
+            if ne == -1:  # malformed — bail out of this span
+                return
+            if ns != -1 and ns < ne:
+                depth += 1
+                k = ns + 5
+            else:
+                depth -= 1
+                k = ne + len("</span>")
+        yield j, k, html[j + len(FOOTNOTE_OPEN): k - len("</span>")]
+        i = k
+
+
+def strip_footnote_spans(s):
+    """Remove footnote spans (content and all) from a rendered string — used
+    for trails/headings/objectives, where a bibliography entry has no place."""
+    out, i = [], 0
+    for start, end, _content in _find_footnote_spans(s):
+        out.append(s[i:start])
+        i = end
+    out.append(s[i:])
+    return "".join(out).strip()
+
+
+def extract_footnotes(blocks):
+    """Post-pass over the finished block html: replace each inline footnote
+    span with a numbered superscript marker (fnrefN -> #fnN) and return the
+    collected footnotes for the section-level list the reader renders at the
+    bottom of the page. Runs on the FINAL html exactly once, so each footnote
+    is seen exactly once, in document order — unlike collection during
+    render(), which double-counts (find_title() runs both for trail
+    bookkeeping and for heading html). Citation text also leaves the blocks'
+    plain-text `text` fields, keeping retrieval prompts clean."""
+    footnotes = []
+    for b in blocks:
+        html = b["html"]
+        out, i, changed = [], 0, False
+        for start, end, content in _find_footnote_spans(html):
+            changed = True
+            footnotes.append(content)
+            n = len(footnotes)
+            out.append(html[i:start])
+            out.append(f'<sup class="footnote-ref">'
+                       f'<a id="fnref{n}" href="#fn{n}" aria-label="Footnote {n}">{n}</a></sup>')
+            i = end
+        if changed:
+            out.append(html[i:])
+            b["html"] = "".join(out)
+            b["text"] = html_to_text(b["html"])
+            b["tokens"] = len(b["text"]) // 4
+        # Trails and headings never keep footnotes — a bibliography entry in a
+        # breadcrumb or heading label is noise.
+        b["trail"] = [strip_footnote_spans(t) for t in b["trail"]]
+        if b["heading"]:
+            b["heading"] = strip_footnote_spans(b["heading"])
+    return [{"id": f"fn{i + 1}", "html": h} for i, h in enumerate(footnotes)]
+
+
 BLOCK_BUDGET = 2500  # target max tokens per grounding/render block
 
 
@@ -249,8 +330,9 @@ def toks(el):
 
 
 def make_block(els, trail, anchor, heading=None, level=2):
-    """Build a block record from a list of CNXML elements."""
-    head_html = f"<h{level}>{escape(heading)}</h{level}>" if heading else ""
+    """Build a block record from a list of CNXML elements. heading, when
+    given, is already-rendered HTML from find_title() — don't re-escape."""
+    head_html = f"<h{level}>{heading}</h{level}>" if heading else ""
     html = head_html + "".join(render(e, level) for e in els)
     text = html_to_text(html)
     return {
@@ -373,6 +455,7 @@ def convert_module(mod_id):
 
     content_el = next(c for c in doc if local(c.tag) == "content")
     blocks = segment(list(content_el), [], counter=[0], level=2)
+    footnotes = extract_footnotes(blocks)
     # prefix anchors with the module id so they are globally unique
     for b in blocks:
         b["anchor"] = f"{mod_id}-{b['anchor']}"
@@ -381,10 +464,11 @@ def convert_module(mod_id):
         "id": mod_id,
         "doc_class": doc_class,
         "title": title,
-        "objectives": extract_objectives(content_el, 1),
+        "objectives": [strip_footnote_spans(o) for o in extract_objectives(content_el, 1)],
         "figures": collect_figures(content_el, 1),
         "tokens": sum(b["tokens"] for b in blocks),
         "blocks": blocks,
+        "footnotes": footnotes,
     }
 
 
