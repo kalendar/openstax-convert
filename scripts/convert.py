@@ -533,38 +533,54 @@ def build(collection_path):
                 return (c.text or "").strip()
         return ""
 
-    for node in content:
-        t = local(node.tag)
-        if t == "module":
-            # top-level module (preface / appendix), no chapter
-            rec = convert_module(node.get("document"))
-            rec.update(kind=rec["doc_class"] or "frontmatter",
-                       chapter=None, number=None)
-            sections.append(rec)
-            toc.append({"id": rec["id"], "number": None,
-                        "title": rec["title"], "chapter": None})
-        elif t == "subcollection":
-            chapter_no += 1
-            ch_title = title_of(node)
-            ch_content = next(c for c in node if local(c.tag) == "content")
-            sec_no = 0
-            toc.append({"chapter": chapter_no, "title": ch_title, "heading": True})
-            for m in ch_content:
-                if local(m.tag) != "module":
-                    continue
-                rec = convert_module(m.get("document"))
-                if rec["doc_class"] == "introduction":
-                    number = None
-                    kind = "introduction"
-                else:
-                    sec_no += 1
-                    number = f"{chapter_no}.{sec_no}"
-                    kind = "section"
-                rec.update(kind=kind, chapter=chapter_no, number=number)
+    def walk(nodes, in_unit=False):
+        # Collections nest arbitrarily: most books are chapter subcollections
+        # holding modules, but some interpose unit subcollections (units →
+        # chapters → modules). A subcollection that contains subcollections is
+        # a grouping (unit): it becomes an unnumbered ToC heading and we
+        # recurse; only innermost subcollections (all-module content) become
+        # numbered chapters. Dropping the recursion silently truncated every
+        # unit-structured book to its unit-intro pages.
+        nonlocal chapter_no
+        for node in nodes:
+            t = local(node.tag)
+            if t == "module":
+                # chapterless module: preface/appendix at top level, or a
+                # unit's own introduction page between chapters
+                rec = convert_module(node.get("document"))
+                default = "unit-introduction" if in_unit else "frontmatter"
+                rec.update(kind=rec["doc_class"] or default,
+                           chapter=None, number=None)
                 sections.append(rec)
-                toc.append({"id": rec["id"], "number": number,
-                            "title": rec["title"], "chapter": chapter_no})
+                toc.append({"id": rec["id"], "number": None,
+                            "title": rec["title"], "chapter": None})
+            elif t == "subcollection":
+                sub_title = title_of(node)
+                children = list(next(c for c in node if local(c.tag) == "content"))
+                if any(local(c.tag) == "subcollection" for c in children):
+                    toc.append({"chapter": None, "title": sub_title, "heading": True})
+                    walk(children, in_unit=True)
+                    continue
+                chapter_no += 1
+                sec_no = 0
+                toc.append({"chapter": chapter_no, "title": sub_title, "heading": True})
+                for m in children:
+                    if local(m.tag) != "module":
+                        continue
+                    rec = convert_module(m.get("document"))
+                    if rec["doc_class"] == "introduction":
+                        number = None
+                        kind = "introduction"
+                    else:
+                        sec_no += 1
+                        number = f"{chapter_no}.{sec_no}"
+                        kind = "section"
+                    rec.update(kind=kind, chapter=chapter_no, number=number)
+                    sections.append(rec)
+                    toc.append({"id": rec["id"], "number": number,
+                                "title": rec["title"], "chapter": chapter_no})
 
+    walk(list(content))
     return sections, toc, meta
 
 
