@@ -77,6 +77,28 @@ def find_title(el):
     return ""
 
 
+def render_mathml(el, top=True):
+    """Serialize a MathML element for inline HTML: unprefixed tags (the HTML
+    parser only recognizes literal <math>), default xmlns on the root, child
+    TAILS preserved inside the expression but the root's own tail excluded
+    (the caller's inner() appends it)."""
+    tag = local(el.tag)
+    attrs = "".join(
+        f' {k.split("}")[-1]}="{escape(v)}"' for k, v in el.attrib.items()
+    )
+    parts = []
+    if el.text:
+        parts.append(escape(el.text))
+    for c in el:
+        parts.append(render_mathml(c, top=False))
+        if c.tail:
+            parts.append(escape(c.tail))
+    body = "".join(parts)
+    if top and tag == "math":
+        return f'<math xmlns="http://www.w3.org/1998/Math/MathML"{attrs}>{body}</math>'
+    return f"<{tag}{attrs}>{body}</{tag}>"
+
+
 def render_figure(el, level):
     src = alt = ""
     caption = ""
@@ -205,8 +227,14 @@ def render(el, level):
         return "<br>"
     if t in ("sup", "sub"):
         return f"<{t}>{inner(el, level)}</{t}>"
-    if t == "math":  # MathML, rare; pass through for native browser rendering
-        return ET.tostring(el, encoding="unicode")
+    if t == "math":
+        # MathML for native browser rendering. NOT ET.tostring(): that (a)
+        # serializes namespaces as prefixes (<ns0:math>), which the HTML parser
+        # does not treat as MathML, and (b) includes the element's TAIL text,
+        # which inner() also appends — duplicating the prose around every
+        # equation (and corrupting the plain-text `text` fields). Found on
+        # Calculus Volume 1, where every math-adjacent phrase doubled.
+        return render_mathml(el)
     if t in ("title", "metadata", "label", "colspec"):
         return ""  # handled elsewhere or non-rendering
     # default: unwrap and keep contents
