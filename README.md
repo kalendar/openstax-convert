@@ -57,6 +57,7 @@ python3 scripts/convert.py --repo book-repo --out output
 | `--out` | Output directory for `book.json` + `media/` (required) |
 | `--collection` | Collection name — only needed for multi-volume books (e.g. Calculus vol 1/2/3); the script lists the choices if there's more than one |
 | `--budget` | Max tokens per block (default 2500). Lower for very small context windows; raise for fewer, larger blocks |
+| `--media-base` | Absolute URL where the book's `media/` files are served, stamped into `book.json` as `media_base`. Lets `book.json` travel without its media — e.g. point it at the source repo itself: `https://raw.githubusercontent.com/openstax/<repo>/main/media/` |
 
 ## Output format
 

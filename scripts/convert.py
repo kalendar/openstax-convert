@@ -612,6 +612,11 @@ def main():
                     help="collection name (only needed if the repo has several)")
     ap.add_argument("--budget", type=int, default=BLOCK_BUDGET,
                     help=f"max tokens per block (default {BLOCK_BUDGET})")
+    ap.add_argument("--media-base", default="",
+                    help="absolute URL where this book's media/ files are served "
+                         "(e.g. https://raw.githubusercontent.com/openstax/<repo>/main/media/); "
+                         "stamped into book.json as media_base so readers can resolve "
+                         "figures without the media being distributed alongside book.json")
     args = ap.parse_args()
 
     SRC = Path(args.repo).resolve()
@@ -639,6 +644,8 @@ def main():
         "sections": sections,
         "toc": toc,
     }
+    if args.media_base:
+        book["media_base"] = args.media_base if args.media_base.endswith("/") else args.media_base + "/"
     (OUT / "book.json").write_text(json.dumps(book, ensure_ascii=False, indent=2))
 
     copied = missing = 0
